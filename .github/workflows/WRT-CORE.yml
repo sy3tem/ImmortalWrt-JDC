@@ -214,10 +214,16 @@ jobs:
 
             find ./bin/targets/ -iregex ".*\(buildinfo\|json\|sha256sums\|packages\)$" -exec rm -rf {} +
 
+            #完整版配置在文件名中追加-full标识
+            FULL_MARK=""
+            if [[ "${WRT_CONFIG,,}" == *"full"* ]]; then
+              FULL_MARK="-full"
+            fi
+
             for FILE in $(find ./bin/targets/ -type f -iname "*$WRT_TARGET*") ; do
               EXT=$(basename $FILE | cut -d '.' -f 2-)
               NAME=$(basename $FILE | cut -d '.' -f 1 | grep -io "\($WRT_TARGET\).*")
-              NEW_FILE="$WRT_INFO"-"$WRT_BRANCH"-"$WRT_WIFI"-"$NAME"-"$WRT_DATE"."$EXT"
+              NEW_FILE="$WRT_INFO"-"$WRT_BRANCH"-"$WRT_WIFI"-"$NAME"$FULL_MARK"-"$WRT_DATE"."$EXT"
               mv -f $FILE ./upload/$NEW_FILE
             done
 
