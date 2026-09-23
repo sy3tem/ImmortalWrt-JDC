@@ -14,6 +14,10 @@ on:
   #手动编译
   workflow_dispatch:
     inputs:
+      CONFIGS:
+        description: '指定要编译的配置，JSON数组，如 ["IPQ60XX-WIFI-NO-FULL"]；留空则编译全部。'
+        required: false
+        type: string
       PACKAGE:
         description: '手动调整插件包，多个请用\n符号隔开。'
         required: false
@@ -35,7 +39,7 @@ jobs:
       fail-fast: false
       #max-parallel: 3
       matrix:
-        CONFIG: [IPQ60XX-WIFI-YES, IPQ60XX-WIFI-YES-FULL]
+        CONFIG: ${{ fromJSON(inputs.CONFIGS || '["IPQ60XX-WIFI-YES", "IPQ60XX-WIFI-YES-FULL", "IPQ60XX-WIFI-NO-FULL"]') }}
         SOURCE: [VIKINGYFY/immortalwrt]
         BRANCH: [main]
 
