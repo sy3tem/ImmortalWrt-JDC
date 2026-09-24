@@ -6,12 +6,6 @@ CONFIG_TARGET_DEVICE_qualcommax_ipq60xx_DEVICE_jdcloud_re-cs-02=y
 CONFIG_TARGET_DEVICE_qualcommax_ipq60xx_DEVICE_jdcloud_re-ss-01=y
 #科学插件调整，仅Full版启用，标准版不带
 CONFIG_PACKAGE_luci-app-homeproxy=y
-#IPTV插件，仅Full版启用，标准版不带
-CONFIG_PACKAGE_luci-app-udpxy=y
-CONFIG_PACKAGE_udpxy=y
-CONFIG_PACKAGE_luci-app-msd_lite=y
-CONFIG_PACKAGE_msd_lite=y
-CONFIG_PACKAGE_igmpproxy=y
 #核心及依赖
 CONFIG_PACKAGE_sing-box=y
 CONFIG_PACKAGE_firewall4=y
