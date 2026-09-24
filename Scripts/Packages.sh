@@ -59,9 +59,8 @@ UPDATE_PACKAGE "nikki" "nikkinikki-org/OpenWrt-nikki" "main"
 UPDATE_PACKAGE "openclash" "vernesong/OpenClash" "dev" "pkg"
 UPDATE_PACKAGE "passwall" "Openwrt-Passwall/openwrt-passwall" "main" "pkg"
 UPDATE_PACKAGE "passwall2" "Openwrt-Passwall/openwrt-passwall2" "main" "pkg"
-#以下两个包 immortalwrt 官方 feeds 没有, 必须从 passwall-packages 单独提取
+#xray-core immortalwrt 官方 feeds 没有, 必须从 passwall-packages 单独提取(v2rayA/passwall 都要用)
 UPDATE_PACKAGE "xray-core" "Openwrt-Passwall/openwrt-passwall-packages" "main" "pkg"
-UPDATE_PACKAGE "ipt2socks" "Openwrt-Passwall/openwrt-passwall-packages" "main" "pkg"
 
 UPDATE_PACKAGE "luci-app-tailscale" "asvow/luci-app-tailscale" "main"
 
