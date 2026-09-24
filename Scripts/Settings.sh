@@ -64,3 +64,111 @@ if [[ "${WRT_TARGET^^}" == *"QUALCOMMAX"* ]]; then
 	#其他调整
 	echo "CONFIG_PACKAGE_kmod-usb-serial-qualcomm=y" >> ./.config
 fi
+
+#自动挂载剩余空间到/opt
+mkdir -p ./package/base-files/files/etc/init.d ./package/base-files/files/etc/rc.d
+cat > ./package/base-files/files/etc/init.d/opt-mount <<'OPTMOUNT'
+#!/bin/sh /etc/rc.common
+#开机自动把磁盘剩余空间挂载到 /opt
+#1)已存在标签为 opt 的分区 -> 直接挂载
+#2)不存在 -> 在根分区所在磁盘的剩余空间新建分区, 格式化为ext4(标签opt)后挂载
+#3)结果写入 /etc/config/fstab, 之后开机自动挂载
+
+START=99
+STOP=10
+
+LABEL="opt"
+TARGET="/opt"
+
+log() {
+	logger -t opt-mount "$1"
+	echo "opt-mount: $1"
+}
+
+is_mounted() {
+	awk -v t="$1" '$2==t {f=1} END {exit !f}' /proc/mounts
+}
+
+root_dev() {
+	awk '$2=="/" {print $1; exit}' /proc/mounts
+}
+
+disk_of() {
+	#/dev/mmcblk0p5 -> /dev/mmcblk0 ; /dev/sda5 -> /dev/sda
+	echo "$1" | sed -E 's#p?[0-9]+$##'
+}
+
+find_by_label() {
+	blkid 2>/dev/null | awk -F: -v l="LABEL=\"$LABEL\"" 'index($0, l) {print $1; exit}'
+}
+
+start() {
+	mkdir -p "$TARGET"
+
+	if is_mounted "$TARGET"; then
+		log "$TARGET 已挂载, 跳过"
+		return 0
+	fi
+
+	local rdev disk dev last uuid
+	rdev=$(root_dev)
+	case "$rdev" in
+		/dev/*) ;;
+		*) log "根分区不是块设备($rdev), 跳过"; return 1 ;;
+	esac
+	disk=$(disk_of "$rdev")
+
+	dev=$(find_by_label)
+
+	if [ -z "$dev" ]; then
+		log "未找到标签为 $LABEL 的分区, 尝试在 $disk 上新建"
+
+		#没有剩余空间时 sfdisk 会直接报错退出, 不会破坏已有分区
+		if ! printf ',,\n' | sfdisk --append "$disk" >/dev/null 2>&1; then
+			log "$disk 没有可用剩余空间, 放弃"
+			return 1
+		fi
+
+		partx -a "$disk" >/dev/null 2>&1
+		blockdev --rereadpt "$disk" >/dev/null 2>&1
+		sleep 2
+
+		last=$(lsblk -nro NAME "$disk" 2>/dev/null | tail -n 1)
+		[ -n "$last" ] || { log "新建分区后找不到设备, 放弃"; return 1; }
+		dev="/dev/$last"
+
+		if [ "$dev" = "$rdev" ] || is_mounted "$dev"; then
+			log "$dev 正在使用中, 放弃"
+			return 1
+		fi
+
+		mkfs.ext4 -F -L "$LABEL" "$dev" >/dev/null 2>&1 || { log "格式化 $dev 失败"; return 1; }
+		log "已新建并格式化 $dev"
+	else
+		log "找到已存在的分区 $dev"
+	fi
+
+	mount -o noatime "$dev" "$TARGET" || { log "挂载 $dev 到 $TARGET 失败"; return 1; }
+
+	uuid=$(blkid -s UUID -o value "$dev" 2>/dev/null)
+	if [ -n "$uuid" ]; then
+		uci -q delete fstab.opt
+		uci set fstab.opt=mount
+		uci set fstab.opt.uuid="$uuid"
+		uci set fstab.opt.target="$TARGET"
+		uci set fstab.opt.fstype=ext4
+		uci set fstab.opt.options=noatime
+		uci set fstab.opt.enabled=1
+		uci commit fstab
+	fi
+
+	log "已将 $dev 挂载到 $TARGET"
+}
+
+stop() {
+	umount "$TARGET" 2>/dev/null
+}
+OPTMOUNT
+chmod +x ./package/base-files/files/etc/init.d/opt-mount
+ln -sf ../init.d/opt-mount ./package/base-files/files/etc/rc.d/S99opt-mount
+echo "opt auto mount script injected!"
