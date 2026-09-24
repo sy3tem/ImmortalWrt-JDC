@@ -70,9 +70,13 @@ mkdir -p ./package/base-files/files/etc/init.d ./package/base-files/files/etc/rc
 cat > ./package/base-files/files/etc/init.d/opt-mount <<'OPTMOUNT'
 #!/bin/sh /etc/rc.common
 #开机自动把磁盘剩余空间挂载到 /opt
-#1)已存在标签为 opt 的分区 -> 直接挂载
-#2)不存在 -> 在根分区所在磁盘的剩余空间新建分区, 格式化为ext4(标签opt)后挂载
-#3)结果写入 /etc/config/fstab, 之后开机自动挂载
+#按以下顺序识别, 逐级回退:
+#1)/opt 已挂载 -> 跳过
+#2)fstab 里已配置 -> 交给系统按配置挂载
+#3)存在标签为 opt 的分区 -> 直接挂载
+#4)根分区所在磁盘上最后一个未挂载的分区 -> 有文件系统就挂, 没文件系统先格式化再挂
+#5)以上都没有 -> 在磁盘剩余空间新建分区后挂载
+#最终结果写入 /etc/config/fstab, 之后开机自动挂载
 
 START=99
 STOP=10
@@ -89,6 +93,10 @@ is_mounted() {
 	awk -v t="$1" '$2==t {f=1} END {exit !f}' /proc/mounts
 }
 
+dev_mounted() {
+	awk -v d="$1" '$1==d {f=1} END {exit !f}' /proc/mounts
+}
+
 root_dev() {
 	awk '$2=="/" {print $1; exit}' /proc/mounts
 }
@@ -98,19 +106,62 @@ disk_of() {
 	echo "$1" | sed -E 's#p?[0-9]+$##'
 }
 
-find_by_label() {
-	blkid 2>/dev/null | awk -F: -v l="LABEL=\"$LABEL\"" 'index($0, l) {print $1; exit}'
+fs_type() {
+	blkid -s TYPE -o value "$1" 2>/dev/null
+}
+
+list_parts() {
+	lsblk -nro NAME,TYPE "$1" 2>/dev/null | awk '$2=="part" {print "/dev/"$1}'
+}
+
+save_fstab() {
+	local dev fstype uuid
+	dev="$1"
+	fstype="$2"
+	uuid=$(blkid -s UUID -o value "$dev" 2>/dev/null)
+	uci -q delete fstab.opt
+	uci set fstab.opt=mount
+	if [ -n "$uuid" ]; then
+		uci set fstab.opt.uuid="$uuid"
+	else
+		uci set fstab.opt.device="$dev"
+	fi
+	uci set fstab.opt.target="$TARGET"
+	uci set fstab.opt.fstype="$fstype"
+	uci set fstab.opt.options=noatime
+	uci set fstab.opt.enabled=1
+	uci commit fstab
+}
+
+mount_dev() {
+	local dev fstype
+	dev="$1"
+	fstype="$2"
+	mount -t "$fstype" -o noatime "$dev" "$TARGET" || return 1
+	save_fstab "$dev" "$fstype"
+	return 0
 }
 
 start() {
 	mkdir -p "$TARGET"
 
+	#1)已经挂载
 	if is_mounted "$TARGET"; then
 		log "$TARGET 已挂载, 跳过"
 		return 0
 	fi
 
-	local rdev disk dev last uuid
+	#2)交给系统按已有配置挂载
+	if [ -x /sbin/block ]; then
+		/sbin/block mount >/dev/null 2>&1
+		if is_mounted "$TARGET"; then
+			log "已按 fstab 配置挂载到 $TARGET"
+			return 0
+		fi
+	fi
+
+	local rdev disk dev fstype cand part
+
 	rdev=$(root_dev)
 	case "$rdev" in
 		/dev/*) ;;
@@ -118,51 +169,68 @@ start() {
 	esac
 	disk=$(disk_of "$rdev")
 
-	dev=$(find_by_label)
-
-	if [ -z "$dev" ]; then
-		log "未找到标签为 $LABEL 的分区, 尝试在 $disk 上新建"
-
-		#没有剩余空间时 sfdisk 会直接报错退出, 不会破坏已有分区
-		if ! printf ',,\n' | sfdisk --append "$disk" >/dev/null 2>&1; then
-			log "$disk 没有可用剩余空间, 放弃"
-			return 1
+	#3)标签为 opt 的分区
+	dev=$(blkid 2>/dev/null | awk -F: -v l="LABEL=\"$LABEL\"" 'index($0, l) {print $1; exit}')
+	if [ -n "$dev" ] && [ -e "$dev" ] && ! dev_mounted "$dev"; then
+		fstype=$(fs_type "$dev")
+		[ -n "$fstype" ] || fstype="ext4"
+		if mount_dev "$dev" "$fstype"; then
+			log "挂载标签为 $LABEL 的分区 $dev 到 $TARGET"
+			return 0
 		fi
-
-		partx -a "$disk" >/dev/null 2>&1
-		blockdev --rereadpt "$disk" >/dev/null 2>&1
-		sleep 2
-
-		last=$(lsblk -nro NAME "$disk" 2>/dev/null | tail -n 1)
-		[ -n "$last" ] || { log "新建分区后找不到设备, 放弃"; return 1; }
-		dev="/dev/$last"
-
-		if [ "$dev" = "$rdev" ] || is_mounted "$dev"; then
-			log "$dev 正在使用中, 放弃"
-			return 1
-		fi
-
-		mkfs.ext4 -F -L "$LABEL" "$dev" >/dev/null 2>&1 || { log "格式化 $dev 失败"; return 1; }
-		log "已新建并格式化 $dev"
-	else
-		log "找到已存在的分区 $dev"
 	fi
 
-	mount -o noatime "$dev" "$TARGET" || { log "挂载 $dev 到 $TARGET 失败"; return 1; }
-
-	uuid=$(blkid -s UUID -o value "$dev" 2>/dev/null)
-	if [ -n "$uuid" ]; then
-		uci -q delete fstab.opt
-		uci set fstab.opt=mount
-		uci set fstab.opt.uuid="$uuid"
-		uci set fstab.opt.target="$TARGET"
-		uci set fstab.opt.fstype=ext4
-		uci set fstab.opt.options=noatime
-		uci set fstab.opt.enabled=1
-		uci commit fstab
+	#4)磁盘上已存在但未挂载的最后一个分区
+	cand=""
+	for part in $(list_parts "$disk"); do
+		[ "$part" = "$rdev" ] && continue
+		dev_mounted "$part" && continue
+		cand="$part"
+	done
+	if [ -n "$cand" ] && [ -e "$cand" ]; then
+		fstype=$(fs_type "$cand")
+		if [ -n "$fstype" ]; then
+			if mount_dev "$cand" "$fstype"; then
+				log "分区 $cand 已存在($fstype), 直接挂载到 $TARGET"
+				return 0
+			fi
+		else
+			if mkfs.ext4 -F -L "$LABEL" "$cand" >/dev/null 2>&1 && mount_dev "$cand" "ext4"; then
+				log "分区 $cand 已存在但未格式化, 已格式化并挂载到 $TARGET"
+				return 0
+			fi
+		fi
 	fi
 
-	log "已将 $dev 挂载到 $TARGET"
+	#5)没有可用分区, 在磁盘末尾新建
+	log "没有可用分区, 尝试在 $disk 上新建"
+	if ! printf ',,\n' | sfdisk --append "$disk" >/dev/null 2>&1; then
+		log "$disk 没有可用剩余空间, 放弃"
+		return 1
+	fi
+	partx -a "$disk" >/dev/null 2>&1
+	blockdev --rereadpt "$disk" >/dev/null 2>&1
+	sleep 2
+
+	cand=""
+	for part in $(list_parts "$disk"); do
+		[ "$part" = "$rdev" ] && continue
+		dev_mounted "$part" && continue
+		cand="$part"
+	done
+	[ -n "$cand" ] && [ -e "$cand" ] || { log "新建分区后找不到设备, 放弃"; return 1; }
+	if [ "$cand" = "$rdev" ] || dev_mounted "$cand"; then
+		log "$cand 正在使用中, 放弃"
+		return 1
+	fi
+	mkfs.ext4 -F -L "$LABEL" "$cand" >/dev/null 2>&1 || { log "格式化 $cand 失败"; return 1; }
+	if mount_dev "$cand" "ext4"; then
+		log "已新建分区 $cand 并挂载到 $TARGET"
+		return 0
+	fi
+
+	log "挂载失败"
+	return 1
 }
 
 stop() {
