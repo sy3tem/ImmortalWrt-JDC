@@ -262,21 +262,25 @@ echo "opt auto mount script injected!"
 #注：FULL 版代理核心已由 sing-box(homeproxy) 换成 xray-core(passwall)，
 #原先"固定 sing-box 到 1.14.1"的段落已移除——保留它会误改 passwall 自带的 sing-box Makefile。
 
-#v2rayA 修复: 固件预置 geoip.dat/geosite.dat, 避免首次启动联网下载失败导致崩溃循环(2017 面板起不来)
-#v2rayA 搜索路径 /usr/share/v2raya/<file>(folder=v2raya), 文件已存在就不会再联网下载, 离线也能启动
-GEO_DIR="./package/base-files/files/usr/share/v2raya"
+#OpenClash 修复: 固件预置 mihomo(meta) 内核到 /etc/openclash/core/clash_meta
+#OpenClash 首启需联网下载内核, 离线环境会启动失败; 预置后离线可用, 进 LuCI 一站式配置
+#京东云 IPQ60xx 是 aarch64_cortex-a53 -> 用 linux-arm64 内核
 if [ -n "$WRT_CONFIG" ] && [[ "${WRT_CONFIG,,}" == *"full"* ]]; then
-	mkdir -p "$GEO_DIR"
-	GEO_TAG=$(curl -sL "https://api.github.com/repos/Loyalsoldier/v2ray-rules-dat/releases/latest" | grep -oE '"tag_name": *"[^"]+"' | head -1 | cut -d'"' -f4)
-	if [ -n "$GEO_TAG" ]; then
-		curl -sL "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/download/$GEO_TAG/geoip.dat" -o "$GEO_DIR/geoip.dat"
-		curl -sL "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/download/$GEO_TAG/geosite.dat" -o "$GEO_DIR/geosite.dat"
-		if [ -s "$GEO_DIR/geoip.dat" ] && [ -s "$GEO_DIR/geosite.dat" ]; then
-			echo "v2rayA geoip/geosite data injected ($GEO_TAG)!"
+	OC_CORE_DIR="./package/base-files/files/etc/openclash/core"
+	mkdir -p "$OC_CORE_DIR"
+	OC_CORE_URL="https://raw.githubusercontent.com/vernesong/OpenClash/core/master/meta/clash-linux-arm64.tar.gz"
+	if curl -sL "$OC_CORE_URL" -o /tmp/clash_meta.tar.gz && [ -s /tmp/clash_meta.tar.gz ]; then
+		tar -xzvf /tmp/clash_meta.tar.gz -C /tmp clash >/dev/null 2>&1
+		if [ -f /tmp/clash ]; then
+			cp -f /tmp/clash "$OC_CORE_DIR/clash_meta"
+			chmod +x "$OC_CORE_DIR/clash_meta"
+			echo "OpenClash mihomo core injected ($(du -h "$OC_CORE_DIR/clash_meta" | cut -f1))!"
+			rm -f /tmp/clash
 		else
-			echo "WARNING: geo data download failed, v2rayA may fail to start offline!"
+			echo "WARNING: cannot extract clash binary from core tarball!"
 		fi
+		rm -f /tmp/clash_meta.tar.gz
 	else
-		echo "WARNING: cannot get v2ray-rules-dat tag!"
+		echo "WARNING: OpenClash core download failed!"
 	fi
 fi

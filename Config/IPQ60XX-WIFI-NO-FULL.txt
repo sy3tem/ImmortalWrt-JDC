@@ -12,17 +12,17 @@ CONFIG_PACKAGE_ath11k-firmware-qcn9074=n
 CONFIG_PACKAGE_ath11k-firmware-qcn9074-ddwrt=n
 CONFIG_PACKAGE_hostapd-common=n
 CONFIG_PACKAGE_wpad-openssl=n
-#科学插件调整，仅Full版启用，标准版不带（xray-core 核心，与服务端 xray 保持一致）
-#UI 用 v2rayA（同为 xray 核，Web 面板更现代）；v2raya 后端自动依赖 xray-core + kmod-nft-tproxy
-CONFIG_PACKAGE_luci-app-v2raya=y
-CONFIG_PACKAGE_v2raya=y
-#核心及依赖
-CONFIG_PACKAGE_xray-core=y
+#科学插件调整，仅Full版启用，标准版不带
+#OpenClash：mihomo 内核(REALITY 已兼容), 仪表盘式现代 UI, 节点/规则全在 LuCI 一站式配置, 不用开第二个网页
+CONFIG_PACKAGE_luci-app-openclash=y
+#核心及依赖(mihomo 内核由 Settings.sh 预置进固件, 离线可首启)
+CONFIG_PACKAGE_dnsmasq-full=y
 CONFIG_PACKAGE_firewall4=y
 CONFIG_PACKAGE_kmod-tun=y
-CONFIG_PACKAGE_kmod-nft-tproxy=y
-CONFIG_PACKAGE_kmod-nft-queue=y
-CONFIG_PACKAGE_kmod-inet-diag=y
-CONFIG_PACKAGE_kmod-netlink-diag=y
+CONFIG_PACKAGE_bash=y
 CONFIG_PACKAGE_curl=y
+CONFIG_PACKAGE_ca-bundle=y
+CONFIG_PACKAGE_ip-full=y
+CONFIG_PACKAGE_ruby=y
+CONFIG_PACKAGE_ruby-yaml=y
 CONFIG_PACKAGE_unzip=y
