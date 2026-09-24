@@ -240,3 +240,6 @@ OPTMOUNT
 chmod +x ./package/base-files/files/etc/init.d/opt-mount
 ln -sf ../init.d/opt-mount ./package/base-files/files/etc/rc.d/S99opt-mount
 echo "opt auto mount script injected!"
+
+#注：FULL 版代理核心已由 sing-box(homeproxy) 换成 xray-core(passwall)，
+#原先"固定 sing-box 到 1.14.1"的段落已移除——保留它会误改 passwall 自带的 sing-box Makefile。

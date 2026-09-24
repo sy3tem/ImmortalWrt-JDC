@@ -26,6 +26,18 @@ if [ -d *"homeproxy"* ]; then
 	cd $PKG_PATH && echo "homeproxy date has been updated!"
 fi
 
+#移除PassWall对lyaml的依赖
+#immortalwrt 的 packages/luci 均无 lyaml, 且 lyaml 编译需要 luarocks/host(同样缺失)
+#去掉后仅影响"导入 Clash YAML 订阅", 导入分享链接与 xray 节点不受影响
+PW_FILE="./luci-app-passwall/Makefile"
+if [ -f "$PW_FILE" ]; then
+	echo " "
+
+	sed -i 's/ +lyaml//g' $PW_FILE
+
+	cd $PKG_PATH && echo "passwall lyaml dependency has been removed!"
+fi
+
 #修改qca-nss-drv启动顺序
 NSS_DRV="../feeds/nss_packages/qca-nss-drv/files/qca-nss-drv.init"
 if [ -f "$NSS_DRV" ]; then
