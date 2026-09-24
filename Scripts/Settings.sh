@@ -98,7 +98,25 @@ dev_mounted() {
 }
 
 root_dev() {
-	awk '$2=="/" {print $1; exit}' /proc/mounts
+	#/proc/mounts 里 / 的源常是 overlayfs:/overlay 而非块设备
+	#真实根分区可能是: ①/rom 挂的块设备(纯squashfs方案) ②/dev/loop0(f2fs loop文件) -> 需 losetup 反推宿主分区
+	local romdev loopback
+	#① 优先: /rom 挂载的块设备(如 /dev/mmcblk0p18 直接挂 /rom)
+	romdev=$(awk '$2=="/rom" && $1 ~ /^\/dev\// {print $1; exit}' /proc/mounts)
+	case "$romdev" in
+		/dev/loop*) romdev="" ;;  #loop 还要往下反推
+		/dev/*) echo "$romdev"; return ;;
+	esac
+	#② loop 设备: losetup 反推宿主分区
+	#   losetup -a 形如: /dev/loop0: [0016]:9 (/mmcblk0p18), offset xxx  -> 宿主是 /dev/mmcblk0p18
+	if [ -e /dev/loop0 ]; then
+		loopback=$(losetup -a 2>/dev/null | grep -oE '\([^()]+\)' | head -1 | tr -d '()')
+		#取括号里名字的 basename(mmcblk0p18), 拼 /dev/ 前缀
+		romdev="/dev/$(basename "$loopback" 2>/dev/null)"
+		[ -n "$loopback" ] && [ -e "$romdev" ] && { echo "$romdev"; return; }
+	fi
+	#③ 兜底: / 直接是块设备
+	awk '$2=="/" && $1 ~ /^\/dev\// {print $1; exit}' /proc/mounts
 }
 
 disk_of() {
@@ -243,3 +261,22 @@ echo "opt auto mount script injected!"
 
 #注：FULL 版代理核心已由 sing-box(homeproxy) 换成 xray-core(passwall)，
 #原先"固定 sing-box 到 1.14.1"的段落已移除——保留它会误改 passwall 自带的 sing-box Makefile。
+
+#v2rayA 修复: 固件预置 geoip.dat/geosite.dat, 避免首次启动联网下载失败导致崩溃循环(2017 面板起不来)
+#v2rayA 搜索路径 /usr/share/v2raya/<file>(folder=v2raya), 文件已存在就不会再联网下载, 离线也能启动
+GEO_DIR="./package/base-files/files/usr/share/v2raya"
+if [ -n "$WRT_CONFIG" ] && [[ "${WRT_CONFIG,,}" == *"full"* ]]; then
+	mkdir -p "$GEO_DIR"
+	GEO_TAG=$(curl -sL "https://api.github.com/repos/Loyalsoldier/v2ray-rules-dat/releases/latest" | grep -oE '"tag_name": *"[^"]+"' | head -1 | cut -d'"' -f4)
+	if [ -n "$GEO_TAG" ]; then
+		curl -sL "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/download/$GEO_TAG/geoip.dat" -o "$GEO_DIR/geoip.dat"
+		curl -sL "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/download/$GEO_TAG/geosite.dat" -o "$GEO_DIR/geosite.dat"
+		if [ -s "$GEO_DIR/geoip.dat" ] && [ -s "$GEO_DIR/geosite.dat" ]; then
+			echo "v2rayA geoip/geosite data injected ($GEO_TAG)!"
+		else
+			echo "WARNING: geo data download failed, v2rayA may fail to start offline!"
+		fi
+	else
+		echo "WARNING: cannot get v2ray-rules-dat tag!"
+	fi
+fi
