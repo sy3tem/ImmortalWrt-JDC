@@ -36,7 +36,7 @@ sed -i "s/192\.168\.[0-9]*\.[0-9]*/$WRT_IP/g" $CFG_FILE
 sed -i "s/hostname='.*'/hostname='$WRT_NAME'/g" $CFG_FILE
 
 #修改默认root密码为 password (默认为空, 写 /etc/shadow, MD5crypt 哈希)
-echo 'root:$1$4C5K7.$bWKIDjvlxEs1g4fjjGvKC.:0:0:99999:7:::' > ./package/base-files/files/etc/shadow
+echo 'root:$1$4C5K7.$KQSzgarR6TWvov9ZTlKPS0:0:0:99999:7:::' > ./package/base-files/files/etc/shadow
 echo "default root password set to 'password'!"
 
 #配置文件修改
