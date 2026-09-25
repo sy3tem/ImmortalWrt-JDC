@@ -71,19 +71,6 @@ fi
 
 #自动挂载剩余空间到/opt
 mkdir -p ./package/base-files/files/etc/init.d ./package/base-files/files/etc/rc.d
-
-#关闭 fstab 匿名自动挂载(默认会把无配置分区挂到 /mnt/<设备名>, 抢占 opt 的目标分区)
-mkdir -p ./package/base-files/files/etc/config
-cat > ./package/base-files/files/etc/config/fstab <<'FSTABCFG'
-config global
-	option anon_swap '0'
-	option anon_mount '0'
-	option auto_swap '1'
-	option auto_mount '1'
-	option delay_root '5'
-	option check_fs '0'
-FSTABCFG
-echo "fstab anon_mount disabled!"
 cat > ./package/base-files/files/etc/init.d/opt-mount <<'OPTMOUNT'
 #!/bin/sh /etc/rc.common
 #开机自动把磁盘剩余空间挂载到 /opt
@@ -116,23 +103,6 @@ dev_mounted() {
 
 mount_point_of() {
 	awk -v d="$1" '$1==d {print $2; exit}' /proc/mounts
-}
-
-#fstab 匿名挂载会把无配置分区抢先挂到 /mnt/<设备名>, 这里允许抢占:
-#已挂在 /mnt/* 下且不是根分区的设备, 先 umount 再视作候选
-steal_from_mnt() {
-	local mp
-	mp=$(mount_point_of "$1")
-	case "$mp" in
-		/mnt/*)
-			if umount "$mp" 2>/dev/null; then
-				log "从 $mp 抢占 $1 (匿名挂载)"
-				return 0
-			fi
-			return 1
-			;;
-	esac
-	return 1
 }
 
 root_dev() {
@@ -216,7 +186,7 @@ start() {
 		fi
 	fi
 
-	local rdev disk dev fstype cand part
+	local rdev disk dev fstype cand part mp
 
 	rdev=$(root_dev)
 	case "$rdev" in
@@ -224,6 +194,22 @@ start() {
 		*) log "根分区不是块设备($rdev), 跳过"; return 1 ;;
 	esac
 	disk=$(disk_of "$rdev")
+
+	#2.5)主动清理: 候选磁盘上被匿名挂载到 /mnt/* 的非根分区, 一律 umount 抢回
+	#fstab 的 anon_mount 会把无配置分区挂到 /mnt/<设备名>, 比我们早, 必须先清掉
+	for part in $(list_parts "$disk"); do
+		[ "$part" = "$rdev" ] && continue
+		mp=$(mount_point_of "$part")
+		case "$mp" in
+			/mnt/*)
+				if umount "$mp" 2>/dev/null; then
+					log "$part 原被匿名挂载到 $mp, 已卸载"
+				else
+					log "警告: $part 挂在 $mp 卸载失败(可能在用), 跳过该分区"
+				fi
+				;;
+		esac
+	done
 
 	#3)标签为 opt 的分区
 	dev=$(blkid 2>/dev/null | awk -F: -v l="LABEL=\"$LABEL\"" 'index($0, l) {print $1; exit}')
@@ -240,7 +226,7 @@ start() {
 	cand=""
 	for part in $(list_parts "$disk"); do
 		[ "$part" = "$rdev" ] && continue
-		dev_mounted "$part" && { steal_from_mnt "$part" || continue; }
+		dev_mounted "$part" && continue
 		cand="$part"
 	done
 	if [ -n "$cand" ] && [ -e "$cand" ]; then
@@ -271,13 +257,13 @@ start() {
 	cand=""
 	for part in $(list_parts "$disk"); do
 		[ "$part" = "$rdev" ] && continue
-		dev_mounted "$part" && { steal_from_mnt "$part" || continue; }
+		dev_mounted "$part" && continue
 		cand="$part"
 	done
 	[ -n "$cand" ] && [ -e "$cand" ] || { log "新建分区后找不到设备, 放弃"; return 1; }
 	if [ "$cand" = "$rdev" ] || dev_mounted "$cand"; then
-		#新建分区也可能被匿名挂载抢先, 再尝试抢一次
-		steal_from_mnt "$cand" || { log "$cand 正在使用中, 放弃"; return 1; }
+		log "$cand 正在使用中, 放弃"
+		return 1
 	fi
 	mkfs.ext4 -F -L "$LABEL" "$cand" >/dev/null 2>&1 || { log "格式化 $cand 失败"; return 1; }
 	if mount_dev "$cand" "ext4"; then
