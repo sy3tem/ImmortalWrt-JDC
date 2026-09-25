@@ -43,6 +43,10 @@ echo "CONFIG_LUCI_LANG_zh_Hans=y" >> ./.config
 echo "CONFIG_PACKAGE_luci-theme-$WRT_THEME=y" >> ./.config
 echo "CONFIG_PACKAGE_luci-app-$WRT_THEME-config=y" >> ./.config
 
+#apk软件源改国内镜像(SJTU上海交大, snapshots滚动版; 刷机后apk install走国内不卡)
+#VERSION_REPO 是编译变量, 写进 /etc/apk/repositories.d/distfeeds.list
+echo 'CONFIG_VERSION_REPO="https://mirrors.sjtug.sjtu.edu.cn/immortalwrt/snapshots"' >> ./.config
+
 #手动调整的插件
 if [ -n "$WRT_PACKAGE" ]; then
 	echo -e "$WRT_PACKAGE" >> ./.config
