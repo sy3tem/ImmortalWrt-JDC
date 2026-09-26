@@ -99,8 +99,12 @@ if [ ! -d ./rtp2httpd ]; then
 	git clone --depth=1 --single-branch --branch main "https://github.com/stackia/rtp2httpd.git" ./rtp2httpd-tmp
 	cp -rf ./rtp2httpd-tmp/openwrt-support/rtp2httpd ./
 	cp -rf ./rtp2httpd-tmp/openwrt-support/luci-app-rtp2httpd ./
+	#非versioned的Makefile的Build/Prepare是"cp $(CURDIR)/../../*"依赖整仓源码, 单独提取子目录会缺源码编译失败
+	#改用上游提供的Makefile.versioned(按tag下源码tarball+PKG_HASH), 重命名覆盖Makefile
+	mv -f ./rtp2httpd/Makefile.versioned ./rtp2httpd/Makefile
+	mv -f ./luci-app-rtp2httpd/Makefile.versioned ./luci-app-rtp2httpd/Makefile
 	rm -rf ./rtp2httpd-tmp
-	echo "rtp2httpd (rtp2httpd + luci-app-rtp2httpd) cloned!"
+	echo "rtp2httpd (rtp2httpd + luci-app-rtp2httpd) cloned with versioned Makefile!"
 fi
 
 #更新软件包版本
