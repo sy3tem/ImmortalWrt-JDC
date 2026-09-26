@@ -79,14 +79,15 @@ UPDATE_PACKAGE "viking" "VIKINGYFY/packages" "main" "" "luci-app-timewol luci-ap
 UPDATE_PACKAGE "vnt" "lmq8267/luci-app-vnt" "main"
 
 #iStore应用商店(用国内 gitcode 镜像克隆, 避免 GitHub 拉取慢/失败)
-#luci-app-store 依赖链: luci-app-store -> luci-lib-taskd -> luci-lib-xterm + taskd(二进制后端, 在仓库根)
-#这些官方feeds都没有, 必须一并提取否则依赖不满足静默不编入; 其余 curl/tar/mount-utils/script-utils 官方源有
+#luci-app-store 依赖链: luci-app-store -> luci-lib-taskd -> luci-lib-xterm + taskd(二进制后端)
+#这4个包都在 istore 仓库的 luci/ 子目录下, 官方feeds都没有, 必须一并提取否则依赖不满足静默不编入
+#其余 curl/tar/mount-utils/script-utils(=util-linux) 官方源有
 if [ ! -d ./luci-app-store ]; then
 	git clone --depth=1 --single-branch --branch main "https://gitcode.com/gh_mirrors/is/istore.git" ./istore-tmp
 	cp -rf ./istore-tmp/luci/luci-app-store ./
 	cp -rf ./istore-tmp/luci/luci-lib-taskd ./
 	cp -rf ./istore-tmp/luci/luci-lib-xterm ./
-	cp -rf ./istore-tmp/taskd ./
+	cp -rf ./istore-tmp/luci/taskd ./
 	rm -rf ./istore-tmp
 	echo "iStore (luci-app-store + luci-lib-taskd + luci-lib-xterm + taskd) cloned from gitcode mirror!"
 fi
