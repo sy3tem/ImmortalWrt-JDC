@@ -45,6 +45,9 @@ echo "CONFIG_PACKAGE_luci-app-$WRT_THEME-config=y" >> ./.config
 
 #apk软件源改国内镜像(SJTU上海交大, snapshots滚动版; 刷机后apk install走国内不卡)
 #VERSION_REPO 是编译变量, 写进 /etc/apk/repositories.d/distfeeds.list
+#坑: CONFIG_VERSION_REPO 在 image-config.in 里被 "if VERSIONOPT ... endif" 包裹,
+#    必须先开 CONFIG_VERSIONOPT=y 否则 kconfig(olddefconfig) 会把 VERSION_REPO 丢弃, 源不生效(之前刷的旧版就是这样白改了)
+echo 'CONFIG_VERSIONOPT=y' >> ./.config
 echo 'CONFIG_VERSION_REPO="https://mirrors.sjtug.sjtu.edu.cn/immortalwrt/snapshots"' >> ./.config
 
 #手动调整的插件
