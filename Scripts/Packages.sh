@@ -92,6 +92,17 @@ if [ ! -d ./luci-app-store ]; then
 	echo "iStore (luci-app-store + luci-lib-taskd + luci-lib-xterm + taskd) cloned from gitcode mirror!"
 fi
 
+#rtp2httpd IPTV组播转单播(官方feeds没有, 从 stackia/rtp2httpd 提取)
+#两个包: openwrt-support/rtp2httpd(核心) + openwrt-support/luci-app-rtp2httpd(LuCI)
+#纯CMake无外部库依赖, luci.mk官方feed有, 依赖闭环无坑
+if [ ! -d ./rtp2httpd ]; then
+	git clone --depth=1 --single-branch --branch main "https://github.com/stackia/rtp2httpd.git" ./rtp2httpd-tmp
+	cp -rf ./rtp2httpd-tmp/openwrt-support/rtp2httpd ./
+	cp -rf ./rtp2httpd-tmp/openwrt-support/luci-app-rtp2httpd ./
+	rm -rf ./rtp2httpd-tmp
+	echo "rtp2httpd (rtp2httpd + luci-app-rtp2httpd) cloned!"
+fi
+
 #更新软件包版本
 UPDATE_VERSION() {
 	local PKG_NAME=$1
