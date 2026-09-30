@@ -188,3 +188,119 @@ exit 0
 EOF
 chmod +x ./package/base-files/files/etc/uci-defaults/98-rtp2httpd-buffer
 echo "rtp2httpd udp_rcvbuf_size=4MB injected!"
+
+#===============================================================================
+#/opt 大分区(eMMC剩余空间) —— 移植 R28S 方案(9-28真机验证), 替代9-25放弃的旧opt-mount
+#  用户思路(极简): 判断eMMC最后一个分区是否已是数据分区 → 已建就直接挂, 没建就在末尾建一个再挂
+#  与R28S差异适配(JDC亚瑟/雅典娜, IPQ60xx):
+#    ①根分区是 loop0(f2fs loop文件), 要 losetup -a 反推真实宿主分区(如 /dev/mmcblk0p18) —— 9-24验证可用
+#    ②分区表是 GPT(京东云u-boot分好p1~p18), p18后约110G空闲, 新建即 p19
+#    ③★必须运行时uci关 anon_mount(9-25失败真因): fstab默认anon_mount=1会把新分区p19抢先挂到
+#      /mnt/mmcblk0p19(比init.d S99早), 导致/opt挂不上; 预写fstab文件会被sysupgrade升级还原,
+#      只能在init.d启动时 uci set 运行时改(每次开机强制执行,升级覆盖不掉) —— R28S 4b710bf已验证
+#  两段式(同R28S): 运行中系统盘新建分区后内核拒读分区表(Resource busy)须reboot一次才识别,
+#    故用 init.d(每次启动跑+幂等) 而非 uci-defaults(只首启一次):
+#      第1次启动: 建分区→reboot; 第2次启动: mkfs.ext4→挂/opt; 之后每次启动跳过
+#===============================================================================
+mkdir -p ./package/base-files/files/etc/init.d ./package/base-files/files/etc/rc.d
+cat <<'EOF' > ./package/base-files/files/etc/init.d/jdc-opt-partition
+#!/bin/sh /etc/rc.common
+#JDC: 把eMMC剩余空间做成大分区挂/opt (移植R28S方案, 9-28真机验证; 替代9-25放弃的旧opt-mount)
+#逻辑(用户定的极简版): 看eMMC最后一个分区是不是数据分区 → 已建就直接挂, 没建就在末尾建一个再挂
+START=99
+
+log() { logger -t jdc-opt "$1"; }
+
+#挂载 + 运行时关anon_mount(9-25失败真因) + 写fstab(供参考,主要靠自己挂载)
+_do_mount() {
+	local PART="$1" UUID="$2"
+	mkdir -p /opt
+	#★运行时关匿名挂载: 防block-mount早期把本分区又挂到/mnt/mmcblk0p19(预写fstab会被sysupgrade还原)
+	uci set fstab.@global[0].anon_mount='0'
+	uci set fstab.@global[0].anon_swap='0'
+	#清掉其它自动挂载项, 只保留/opt
+	while uci -q del fstab.@mount[-1]; do true; done
+	uci add fstab mount
+	uci set fstab.@mount[-1].target="/opt"
+	uci set fstab.@mount[-1].uuid="$UUID"
+	uci set fstab.@mount[-1].enabled="1"
+	uci commit fstab
+	#卸载/mnt下的占用 + 删残留空目录(用/proc/mounts判断挂载点, 不依赖额外包)
+	local m
+	for m in /mnt/mmcblk0p18 /mnt/mmcblk0p19 /mnt/mmcblk1p18 /mnt/mmcblk1p19; do
+		umount "$m" 2>/dev/null
+		awk -v t="$m" '$2==t{f=1}END{exit !f}' /proc/mounts 2>/dev/null || rmdir "$m" 2>/dev/null
+	done
+	mount -t ext4 -o noatime "UUID=$UUID" /opt 2>&1 | logger -t jdc-opt || \
+		mount "$PART" /opt 2>&1 | logger -t jdc-opt
+	log "$PART ($UUID) mounted at /opt"
+}
+
+start() {
+	for c in sfdisk mkfs.ext4 blkid lsblk losetup uci; do
+		command -v "$c" >/dev/null 2>&1 || { log "missing $c, skip"; return 0; }
+	done
+
+	#已挂载则跳过(幂等; /opt/docker是bind不算)
+	awk '$2=="/opt"{f=1}END{exit !f}' /proc/mounts 2>/dev/null && return 0
+
+	#①找真实根分区: / 是 overlayfs, 根常在 /dev/loop0(f2fs loop) → losetup反推宿主分区
+	#   losetup -a 形如: /dev/loop0: [0016]:9 (/mmcblk0p18), offset xxx
+	local ROMPART DISK
+	ROMPART=$(lsblk -nr -o PATH,MOUNTPOINT 2>/dev/null | awk '$2=="/rom"{print $1; exit}')
+	case "$ROMPART" in
+	/dev/loop*)
+		ROMPART=$(losetup -a 2>/dev/null | grep -oE '\([^()]+\)' | head -1 | tr -d '()')
+		ROMPART="/dev/$(basename "$ROMPART" 2>/dev/null)"
+		;;
+	esac
+	#兜底: / 直接是块设备
+	[ -b "$ROMPART" ] || ROMPART=$(awk '$2=="/" && $1 ~ /^\/dev\/mmcblk/ {print $1; exit}' /proc/mounts)
+	case "$ROMPART" in
+	/dev/mmcblk*p*) DISK="${ROMPART%p*}" ;;
+	*) DISK="" ; for d in /dev/mmcblk0 /dev/mmcblk1; do [ -b "${d}p18" ] && { DISK="$d"; break; }; done ;;
+	esac
+	[ -b "$DISK" ] || { log "system disk not found, skip"; return 0; }
+
+	#②取eMMC最后一个分区(用户核心判断): 已是数据分区就直接挂, 否则末尾建一个
+	local LASTPART LASTNUM NEWPART FS UUID
+	LASTPART=$(lsblk -nr -o PATH "$DISK" 2>/dev/null | grep -E "p[0-9]+$" | sort -V | tail -1)
+	LASTNUM=$(echo "$LASTPART" | grep -oE 'p[0-9]+$' | tr -d 'p')
+	[ -n "$LASTNUM" ] || { log "no partition on $DISK, skip"; return 0; }
+	NEWPART="${DISK}p$((LASTNUM + 1))"
+
+	#最后一个分区已是ext4数据分区(非根/非boot, 即上次建的) → 直接挂载
+	if [ "$LASTPART" != "$ROMPART" ]; then
+		FS=$(blkid -o value -s TYPE "$LASTPART" 2>/dev/null)
+		if [ "$FS" = "ext4" ]; then
+			UUID=$(blkid -o value -s UUID "$LASTPART" 2>/dev/null)
+			[ -n "$UUID" ] && { _do_mount "$LASTPART" "$UUID"; return 0; }
+		fi
+	fi
+
+	#否则在末尾新建数据分区(选最大空闲块起始扇区, GPT安全append不重建整表)
+	local MAXSTART
+	MAXSTART=$(sfdisk -F "$DISK" 2>/dev/null | awk '/^ *[0-9]+ +[0-9]+ +[0-9]+/{print $1, $3}' | sort -k2 -n | tail -1 | awk '{print $1}')
+	[ -n "$MAXSTART" ] || { log "no free space on $DISK, skip"; return 0; }
+	log "create $NEWPART from sector $MAXSTART (largest free space)"
+	echo "${MAXSTART},,L," | sfdisk -a --force --no-reread "$DISK" 2>&1 | logger -t jdc-opt
+	sync
+	#内核未识别新分区(磁盘在用) → reboot让内核重读
+	if [ ! -b "$NEWPART" ]; then
+		log "partition table written, reboot to recognize $NEWPART"
+		sleep 2
+		reboot
+		return 0
+	fi
+	#格式化(reboot后新分区已出现)
+	log "mkfs.ext4 on $NEWPART"
+	mkfs.ext4 -F "$NEWPART" 2>&1 | logger -t jdc-opt
+	sync
+	UUID=$(blkid -o value -s UUID "$NEWPART" 2>/dev/null)
+	[ -n "$UUID" ] && _do_mount "$NEWPART" "$UUID"
+	return 0
+}
+EOF
+chmod +x ./package/base-files/files/etc/init.d/jdc-opt-partition
+ln -sf ../init.d/jdc-opt-partition ./package/base-files/files/etc/rc.d/S99jdc-opt-partition
+echo "JDC /opt big-partition init.d service injected!"
