@@ -50,6 +50,8 @@ UPDATE_PACKAGE() {
 #argon主题源: 用原作者 jerrykuku 正版官方仓(master活跃, 默认背景img/bg1.jpg草地露珠风景照+可选Bing在线壁纸)
 #坑: 之前用 sbwml/luci-theme-argon 是备份fork(v2.4.2), 换了默认背景为img/bg.webp蓝色几何图, 跟官方不一样
 UPDATE_PACKAGE "argon" "jerrykuku/luci-theme-argon" "master"
+#argon配置插件(换背景/开Bing壁纸): jerrykuku分独立仓, 主题仓不含, 需单独提取否则 luci-app-argon-config=y 找不到包被丢弃
+UPDATE_PACKAGE "argon-config" "jerrykuku/luci-app-argon-config" "master"
 UPDATE_PACKAGE "aurora" "eamonxg/luci-theme-aurora" "master"
 UPDATE_PACKAGE "aurora-config" "eamonxg/luci-app-aurora-config" "master"
 UPDATE_PACKAGE "kucat" "sirpdboy/luci-theme-kucat" "master"
