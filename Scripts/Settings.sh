@@ -98,13 +98,12 @@ fi
 mkdir -p ./package/base-files/files/etc/uci-defaults
 cat <<'EOF' > ./package/base-files/files/etc/uci-defaults/97-iptv-multicast
 #!/bin/sh
-#IPTV组播三要素固化(uci-defaults首启兜底): 仅当iptv接口已存在且zone未建时执行
-#接口后建的场景由hotplug.d/iface/97-iptv-multicast兜底
+#IPTV组播三要素固化(uci-defaults首启): zone+IGMPv2+组播路由 无条件先建
+#  zone是防火墙规则容器, 建不建跟iptv接口存不存在/up不up无关 —— 不等接口, 首启就建好
+#  (之前写成"接口存在才建"是bug: 首启时接口还没建就整个跳过, 之后uci-defaults不重跑, zone永远没有)
+#  组播路由/IGMPv2的运行时部分跟接口设备走, 由hotplug.d/iface/97-iptv-multicast在接口up时补
 
-#仅当 network.iptv 接口存在才处理(否则留给hotplug)
-uci -q get network.iptv >/dev/null || exit 0
-
-#②独立iptv防火墙zone(幂等: 已建则跳过)
+#②独立iptv防火墙zone(幂等: 已建则跳过; 无条件建, 不等接口)
 if ! uci -q get firewall.iptv >/dev/null; then
 	uci set firewall.iptv=zone
 	uci set firewall.iptv.name='iptv'
@@ -137,15 +136,17 @@ EOF
 mkdir -p ./package/base-files/files/etc/hotplug.d/iface
 cat <<'EOF' > ./package/base-files/files/etc/hotplug.d/iface/97-iptv-multicast
 #!/bin/sh
-#IPTV组播三要素 hotplug兜底: 每次 ifup iptv 时补建 zone+组播路由+IGMPv2(无论接口何时建/重连都自动就绪)
-[ "$ACTION" = "ifup" ] || exit 0
+#IPTV组播三要素 hotplug兜底: iptv接口 up/更新 时补建 zone+组播路由+IGMPv2
+#  触发放宽: ifup(接口起来) + ifupdate/update(手动建/改接口时netifd发的事件), 覆盖"先建接口后up"和"改接口"
+#  zone建不依赖接口up(zone是防火墙容器), 即使接口down也照建; 组播路由/IGMPv2才需接口设备DEV
+
+case "$ACTION" in
+	ifup|ifupdate|update) ;;
+	*) exit 0 ;;
+esac
 [ "$INTERFACE" = "iptv" ] || exit 0
 
-#接口实际设备名(pppoe-iptv/eth0.45/br-iptv等), 取不到则用接口名
-DEV=$(ubus call network.interface.iptv status 2>/dev/null | jsonfilter -e '@.l3_device' 2>/dev/null)
-[ -z "$DEV" ] && DEV="$INTERFACE"
-
-#②建防火墙zone(若缺)并重载
+#②建防火墙zone(若缺)并重载 —— 无条件建, 不等接口up/不等DEV
 if ! uci -q get firewall.iptv >/dev/null; then
 	uci set firewall.iptv=zone
 	uci set firewall.iptv.name='iptv'
@@ -158,6 +159,11 @@ if ! uci -q get firewall.iptv >/dev/null; then
 	uci commit firewall
 	/etc/init.d/firewall reload >/dev/null 2>&1
 fi
+
+#接口实际设备名(pppoe-iptv/eth0.45/wan.45/br-iptv等), 取不到则跳过路由/IGMP(接口down时无l3_device)
+DEV=$(ubus call network.interface.iptv status 2>/dev/null | jsonfilter -e '@.l3_device' 2>/dev/null)
+[ -z "$DEV" ] && DEV=$(uci -q get network.iptv.device 2>/dev/null)
+[ -z "$DEV" ] && exit 0
 
 #①组播路由指向IPTV接口设备(224/4 + 239/8, replace幂等)
 ip route replace 224.0.0.0/4 dev "$DEV" 2>/dev/null
