@@ -111,6 +111,10 @@ if [ ! -d ./rtp2httpd ]; then
 	echo "rtp2httpd (rtp2httpd + luci-app-rtp2httpd) cloned with versioned Makefile!"
 fi
 
+#OpenAppFilter(应用过滤/家长控制): destan19/OpenAppFilter, 仓根3包(oaf内核模块/open-app-filter核心/luci-app-oaf LuCI)
+#作者给的用法示例(本文件顶部注释): 第5参数删 luci-app-appfilter oaf 旧组件, 避免coremark错误
+UPDATE_PACKAGE "open-app-filter" "destan19/OpenAppFilter" "master" "" "luci-app-appfilter oaf"
+
 #更新软件包版本
 UPDATE_VERSION() {
 	local PKG_NAME=$1

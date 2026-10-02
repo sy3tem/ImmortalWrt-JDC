@@ -123,6 +123,8 @@ CONFIG_PACKAGE_zram-swap=y
 #IPTV组播转单播代理(rtp2httpd, 比msd_lite/udpxy更省资源, 支持FCC快速换台/RTSP/FEC纠错/Web播放器)
 CONFIG_PACKAGE_rtp2httpd=y
 CONFIG_PACKAGE_luci-app-rtp2httpd=y
+#OpenAppFilter(应用过滤/家长控制) LuCI(依赖链自动带appfilter核心+kmod-oaf内核模块)
+CONFIG_PACKAGE_luci-app-oaf=y
 #iStore应用商店
 CONFIG_PACKAGE_luci-app-store=y
 
